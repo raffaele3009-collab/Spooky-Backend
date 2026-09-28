@@ -19,11 +19,17 @@ mongoose
   .then(() => console.log("Connesso a MongoDB ✅"))
   .catch((errore) => console.error("Errore connessione MongoDB:", errore));
 
+// Categorie ammesse per un post. "diario" resta il valore di default,
+// cosi i post pubblicati prima di questa modifica continuano a comparire
+// nella sezione "Diario per Dormiglioni" senza bisogno di toccarli.
+const CATEGORIE_AMMESSE = ["diario", "storie"];
+
 // Definiamo la "forma" di un post (schema)
 const postSchema = new mongoose.Schema({
   titolo: { type: String, required: true },
   data: { type: String, required: true },
-  contenuto: { type: String, required: true }
+  contenuto: { type: String, required: true },
+  categoria: { type: String, default: "diario" }
 }, { timestamps: true });
 
 const Post = mongoose.model("Post", postSchema);
@@ -39,6 +45,7 @@ app.post("/api/upload-post", upload.single("file"), async (req, res) => {
     }
 
     const titolo = req.body.titolo || "Senza titolo";
+    const categoria = CATEGORIE_AMMESSE.includes(req.body.categoria) ? req.body.categoria : "diario";
 
     // Mammoth converte il .docx in HTML, mantenendo paragrafi, titoli, grassetti ecc.
     const risultato = await mammoth.convertToHtml({ buffer: req.file.buffer });
@@ -48,7 +55,8 @@ app.post("/api/upload-post", upload.single("file"), async (req, res) => {
     const nuovoPost = new Post({
       titolo: titolo,
       data: new Date().toISOString().split("T")[0],
-      contenuto: contenutoHTML
+      contenuto: contenutoHTML,
+      categoria: categoria
     });
 
     await nuovoPost.save(); // <-- salvato su MongoDB, sopravvive ai riavvii
@@ -85,7 +93,7 @@ app.delete("/api/posts/:id", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.send("Backend blog Sognidor attivo ✅ (con MongoDB)");
+  res.send("Backend blog Spooky attivo ✅ (con MongoDB)");
 });
 
 app.listen(PORT, () => {
