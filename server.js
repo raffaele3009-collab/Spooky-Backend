@@ -36,7 +36,7 @@ mongoose
 // Categorie ammesse per un post. "diario" resta il valore di default,
 // cosi i post pubblicati prima di questa modifica continuano a comparire
 // nella sezione "Diario per Dormiglioni" senza bisogno di toccarli.
-const CATEGORIE_AMMESSE = ["diario", "storie"];
+const CATEGORIE_AMMESSE = ["diario", "storie", "poesie"];
 
 // Definiamo la "forma" di un post (schema)
 const postSchema = new mongoose.Schema({
