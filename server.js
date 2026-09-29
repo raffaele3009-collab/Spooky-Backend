@@ -1,6 +1,7 @@
 const express = require("express");
 const multer = require("multer");
 const mammoth = require("mammoth");
+const pdfParse = require("pdf-parse");
 const cors = require("cors");
 const mongoose = require("mongoose");
 
@@ -41,24 +42,61 @@ function analizzaParoleChiave(testo) {
   return testo.split(",").map(p => p.trim().toLowerCase()).filter(p => p.length > 0);
 }
 
-// Multer: riceve il file .docx in memoria (non lo salva su disco)
+// Trasforma il testo semplice estratto da un PDF in paragrafi HTML,
+// mantenendo almeno la struttura a capoversi (i PDF non hanno grassetti/
+// titoli riconoscibili come un .docx, quindi qui va bene il solo testo).
+function testoInParagrafi(testo) {
+  return testo
+    .split(/\n\s*\n/)
+    .map(p => p.trim())
+    .filter(p => p.length > 0)
+    .map(p => `<p>${p.replace(/\n/g, " ")}</p>`)
+    .join("");
+}
+
+// Pagine del sito modificabili dall'editor (oggi solo "chi-siamo")
+const paginaSchema = new mongoose.Schema({
+  chiave: { type: String, required: true, unique: true },
+  contenuto: { type: String, required: true }
+}, { timestamps: true });
+
+const Pagina = mongoose.model("Pagina", paginaSchema);
+
+// Multer: riceve il file (.docx o .pdf) in memoria (non lo salva su disco)
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ENDPOINT 1: riceve un file .docx, lo converte in HTML e lo salva come nuovo post
+// ENDPOINT 1: riceve un file .docx o .pdf, lo converte in HTML e lo salva come nuovo post
 app.post("/api/upload-post", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ errore: "Nessun file ricevuto" });
     }
 
+    const nomeFile = (req.file.originalname || "").toLowerCase();
+    const eDocx = nomeFile.endsWith(".docx");
+    const ePdf = nomeFile.endsWith(".pdf");
+
+    if (!eDocx && !ePdf) {
+      return res.status(400).json({ errore: "Formato non supportato: carica un file .docx o .pdf" });
+    }
+
     const titolo = req.body.titolo || "Senza titolo";
     const categoria = CATEGORIE_AMMESSE.includes(req.body.categoria) ? req.body.categoria : "diario";
     const paroleChiave = analizzaParoleChiave(req.body.paroleChiave);
 
-    // Mammoth converte il .docx in HTML, mantenendo paragrafi, titoli, grassetti ecc.
-    const risultato = await mammoth.convertToHtml({ buffer: req.file.buffer });
-    const contenutoHTML = risultato.value;
-    const avvisi = risultato.messages;
+    let contenutoHTML;
+    let avvisi = [];
+
+    if (eDocx) {
+      // Mammoth converte il .docx in HTML, mantenendo paragrafi, titoli, grassetti ecc.
+      const risultato = await mammoth.convertToHtml({ buffer: req.file.buffer });
+      contenutoHTML = risultato.value;
+      avvisi = risultato.messages;
+    } else {
+      // pdf-parse estrae il solo testo (i PDF non hanno una struttura come il .docx)
+      const risultatoPdf = await pdfParse(req.file.buffer);
+      contenutoHTML = testoInParagrafi(risultatoPdf.text);
+    }
 
     const nuovoPost = new Post({
       titolo: titolo,
@@ -118,6 +156,37 @@ app.delete("/api/posts/:id", async (req, res) => {
     res.json({ messaggio: "Post eliminato" });
   } catch (errore) {
     res.status(500).json({ errore: "Errore nell'eliminazione del post" });
+  }
+});
+
+// ENDPOINT 5: legge il contenuto di una pagina del sito (oggi solo "chi-siamo")
+app.get("/api/pagina/:chiave", async (req, res) => {
+  try {
+    const pagina = await Pagina.findOne({ chiave: req.params.chiave });
+    if (!pagina) {
+      return res.status(404).json({ errore: "Pagina non trovata" });
+    }
+    res.json(pagina);
+  } catch (errore) {
+    res.status(500).json({ errore: "Errore nel recupero della pagina" });
+  }
+});
+
+// ENDPOINT 6: salva/aggiorna il contenuto di una pagina del sito
+app.put("/api/pagina/:chiave", async (req, res) => {
+  try {
+    if (req.body.contenuto === undefined) {
+      return res.status(400).json({ errore: "Contenuto mancante" });
+    }
+    const pagina = await Pagina.findOneAndUpdate(
+      { chiave: req.params.chiave },
+      { contenuto: req.body.contenuto },
+      { new: true, upsert: true }
+    );
+    res.json(pagina);
+  } catch (errore) {
+    console.error("Errore durante il salvataggio della pagina:", errore);
+    res.status(500).json({ errore: "Errore nel salvataggio della pagina" });
   }
 });
 
