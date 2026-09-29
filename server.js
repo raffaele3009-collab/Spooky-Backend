@@ -17,7 +17,20 @@ const MONGODB_URI = process.env.MONGODB_URI;
 
 mongoose
   .connect(MONGODB_URI)
-  .then(() => console.log("Connesso a MongoDB ✅"))
+  .then(async () => {
+    console.log("Connesso a MongoDB ✅");
+    // I post pubblicati prima dell'introduzione della programmazione non hanno
+    // il campo "pubblicazione": glielo assegniamo pari alla data di creazione,
+    // così restano visibili subito e non "scompaiono" dal sito.
+    try {
+      await Post.updateMany(
+        { pubblicazione: { $exists: false } },
+        [{ $set: { pubblicazione: "$createdAt" } }]
+      );
+    } catch (errore) {
+      console.error("Errore nella migrazione del campo pubblicazione:", errore);
+    }
+  })
   .catch((errore) => console.error("Errore connessione MongoDB:", errore));
 
 // Categorie ammesse per un post. "diario" resta il valore di default,
@@ -31,7 +44,11 @@ const postSchema = new mongoose.Schema({
   data: { type: String, required: true },
   contenuto: { type: String, required: true },
   categoria: { type: String, default: "diario" },
-  paroleChiave: { type: [String], default: [] }
+  paroleChiave: { type: [String], default: [] },
+  // Momento (data + ora) in cui il post diventa visibile sul sito.
+  // Di default è "adesso", ma può essere impostato nel futuro per
+  // programmare l'uscita in anticipo.
+  pubblicazione: { type: Date, default: Date.now }
 }, { timestamps: true });
 
 const Post = mongoose.model("Post", postSchema);
@@ -84,6 +101,15 @@ app.post("/api/upload-post", upload.single("file"), async (req, res) => {
     const categoria = CATEGORIE_AMMESSE.includes(req.body.categoria) ? req.body.categoria : "diario";
     const paroleChiave = analizzaParoleChiave(req.body.paroleChiave);
 
+    // Se viene passata una data/ora di pubblicazione valida, il post esce
+    // (diventa visibile pubblicamente) solo a partire da quel momento.
+    // Altrimenti è pubblicato immediatamente.
+    let pubblicazione = new Date();
+    if (req.body.pubblicazione) {
+      const dataRichiesta = new Date(req.body.pubblicazione);
+      if (!isNaN(dataRichiesta.getTime())) pubblicazione = dataRichiesta;
+    }
+
     let contenutoHTML;
     let avvisi = [];
 
@@ -103,7 +129,8 @@ app.post("/api/upload-post", upload.single("file"), async (req, res) => {
       data: new Date().toISOString().split("T")[0],
       contenuto: contenutoHTML,
       categoria: categoria,
-      paroleChiave: paroleChiave
+      paroleChiave: paroleChiave,
+      pubblicazione: pubblicazione
     });
 
     await nuovoPost.save(); // <-- salvato su MongoDB, sopravvive ai riavvii
@@ -119,10 +146,15 @@ app.post("/api/upload-post", upload.single("file"), async (req, res) => {
   }
 });
 
-// ENDPOINT 2: restituisce tutti i post salvati (usato dal blog con fetch)
+// ENDPOINT 2: restituisce i post salvati (usato dal blog con fetch).
+// Di default nasconde i post ancora programmati per il futuro; l'editor
+// (uso interno, privato) passa ?tutti=1 per vederli tutti, compresi quelli
+// non ancora usciti.
 app.get("/api/posts", async (req, res) => {
   try {
-    const posts = await Post.find().sort({ createdAt: -1 }); // più recenti prima
+    const vediTutti = req.query.tutti === "1";
+    const filtro = vediTutti ? {} : { pubblicazione: { $lte: new Date() } };
+    const posts = await Post.find(filtro).sort({ pubblicazione: -1 }); // più recenti prima
     res.json(posts);
   } catch (errore) {
     res.status(500).json({ errore: "Errore nel recupero dei post" });
@@ -137,6 +169,10 @@ app.put("/api/posts/:id", async (req, res) => {
     if (req.body.contenuto !== undefined) aggiornamenti.contenuto = req.body.contenuto;
     if (CATEGORIE_AMMESSE.includes(req.body.categoria)) aggiornamenti.categoria = req.body.categoria;
     if (req.body.paroleChiave !== undefined) aggiornamenti.paroleChiave = analizzaParoleChiave(req.body.paroleChiave);
+    if (req.body.pubblicazione) {
+      const dataRichiesta = new Date(req.body.pubblicazione);
+      if (!isNaN(dataRichiesta.getTime())) aggiornamenti.pubblicazione = dataRichiesta;
+    }
 
     const postAggiornato = await Post.findByIdAndUpdate(req.params.id, aggiornamenti, { new: true });
     if (!postAggiornato) {
