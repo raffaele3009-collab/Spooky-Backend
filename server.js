@@ -82,7 +82,26 @@ app.get("/api/posts", async (req, res) => {
   }
 });
 
-// ENDPOINT 3 (utile per test): elimina un post per id
+// ENDPOINT 3: aggiorna titolo, testo e/o categoria di un post già pubblicato
+app.put("/api/posts/:id", async (req, res) => {
+  try {
+    const aggiornamenti = {};
+    if (req.body.titolo !== undefined) aggiornamenti.titolo = req.body.titolo;
+    if (req.body.contenuto !== undefined) aggiornamenti.contenuto = req.body.contenuto;
+    if (CATEGORIE_AMMESSE.includes(req.body.categoria)) aggiornamenti.categoria = req.body.categoria;
+
+    const postAggiornato = await Post.findByIdAndUpdate(req.params.id, aggiornamenti, { new: true });
+    if (!postAggiornato) {
+      return res.status(404).json({ errore: "Post non trovato" });
+    }
+    res.json(postAggiornato);
+  } catch (errore) {
+    console.error("Errore durante l'aggiornamento:", errore);
+    res.status(500).json({ errore: "Errore durante l'aggiornamento del post" });
+  }
+});
+
+// ENDPOINT 4 (utile per test): elimina un post per id
 app.delete("/api/posts/:id", async (req, res) => {
   try {
     await Post.findByIdAndDelete(req.params.id);
