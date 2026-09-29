@@ -29,10 +29,17 @@ const postSchema = new mongoose.Schema({
   titolo: { type: String, required: true },
   data: { type: String, required: true },
   contenuto: { type: String, required: true },
-  categoria: { type: String, default: "diario" }
+  categoria: { type: String, default: "diario" },
+  paroleChiave: { type: [String], default: [] }
 }, { timestamps: true });
 
 const Post = mongoose.model("Post", postSchema);
+
+// Trasforma "Horror, Paura , Poesie" in ["horror", "paura", "poesie"]
+function analizzaParoleChiave(testo) {
+  if (!testo) return [];
+  return testo.split(",").map(p => p.trim().toLowerCase()).filter(p => p.length > 0);
+}
 
 // Multer: riceve il file .docx in memoria (non lo salva su disco)
 const upload = multer({ storage: multer.memoryStorage() });
@@ -46,6 +53,7 @@ app.post("/api/upload-post", upload.single("file"), async (req, res) => {
 
     const titolo = req.body.titolo || "Senza titolo";
     const categoria = CATEGORIE_AMMESSE.includes(req.body.categoria) ? req.body.categoria : "diario";
+    const paroleChiave = analizzaParoleChiave(req.body.paroleChiave);
 
     // Mammoth converte il .docx in HTML, mantenendo paragrafi, titoli, grassetti ecc.
     const risultato = await mammoth.convertToHtml({ buffer: req.file.buffer });
@@ -56,7 +64,8 @@ app.post("/api/upload-post", upload.single("file"), async (req, res) => {
       titolo: titolo,
       data: new Date().toISOString().split("T")[0],
       contenuto: contenutoHTML,
-      categoria: categoria
+      categoria: categoria,
+      paroleChiave: paroleChiave
     });
 
     await nuovoPost.save(); // <-- salvato su MongoDB, sopravvive ai riavvii
@@ -82,13 +91,14 @@ app.get("/api/posts", async (req, res) => {
   }
 });
 
-// ENDPOINT 3: aggiorna titolo, testo e/o categoria di un post già pubblicato
+// ENDPOINT 3: aggiorna titolo, testo, categoria e/o parole chiave di un post già pubblicato
 app.put("/api/posts/:id", async (req, res) => {
   try {
     const aggiornamenti = {};
     if (req.body.titolo !== undefined) aggiornamenti.titolo = req.body.titolo;
     if (req.body.contenuto !== undefined) aggiornamenti.contenuto = req.body.contenuto;
     if (CATEGORIE_AMMESSE.includes(req.body.categoria)) aggiornamenti.categoria = req.body.categoria;
+    if (req.body.paroleChiave !== undefined) aggiornamenti.paroleChiave = analizzaParoleChiave(req.body.paroleChiave);
 
     const postAggiornato = await Post.findByIdAndUpdate(req.params.id, aggiornamenti, { new: true });
     if (!postAggiornato) {
